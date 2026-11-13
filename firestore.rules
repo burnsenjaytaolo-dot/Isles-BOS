@@ -1,0 +1,918 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Global Hardened Primitives
+    // =========================================================================
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidOptionalString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isValidNonNegativeNumber(val) {
+      return (val is int || val is float) && val >= 0;
+    }
+
+    function isValidNumber(val) {
+      return val is int || val is float;
+    }
+
+    function isValidRole(role) {
+      return role in ['Owner', 'Administrator', 'Manager', 'Cashier', 'Inventory Staff', 'Accountant', 'Viewer'];
+    }
+
+    function isValidInvitableRole(role) {
+      return role in ['Administrator', 'Manager', 'Cashier', 'Inventory Staff', 'Accountant', 'Viewer'];
+    }
+
+    function isValidPaymentMethod(method) {
+      return method in ['Cash', 'Bank Transfer', 'Mobile Money', 'Credit'];
+    }
+
+    function isValidSaleStatus(status) {
+      return status in ['Paid', 'Part paid', 'Pay later'];
+    }
+
+    // =========================================================================
+    // Master Gate: Authoritative Tenant Membership Helpers
+    // =========================================================================
+
+    function isActiveMember(businessId) {
+      return isVerified()
+        && exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function memberRole(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isBusinessOwner(businessId) {
+      return isActiveMember(businessId) && memberRole(businessId) == 'Owner';
+    }
+
+    function isBusinessAdmin(businessId) {
+      return isActiveMember(businessId) && memberRole(businessId) in ['Owner', 'Administrator'];
+    }
+
+    function canManageSales(businessId) {
+      return isActiveMember(businessId) && memberRole(businessId) in ['Owner', 'Administrator', 'Manager', 'Cashier'];
+    }
+
+    function canManageStock(businessId) {
+      return isActiveMember(businessId) && memberRole(businessId) in ['Owner', 'Administrator', 'Manager', 'Inventory Staff'];
+    }
+
+    function canManageCustomers(businessId) {
+      return isActiveMember(businessId) && memberRole(businessId) in ['Owner', 'Administrator', 'Manager', 'Cashier', 'Accountant'];
+    }
+
+    function canManageExpenses(businessId) {
+      return isActiveMember(businessId) && memberRole(businessId) in ['Owner', 'Administrator', 'Manager', 'Accountant'];
+    }
+
+    function canRecordPayments(businessId) {
+      return isActiveMember(businessId) && memberRole(businessId) in ['Owner', 'Administrator', 'Manager', 'Cashier', 'Accountant'];
+    }
+
+    // =========================================================================
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // =========================================================================
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.uid == userId
+        && isValidId(data.uid)
+        && isValidString(data.displayName, 1, 120)
+        && isValidString(data.email, 3, 150)
+        && isValidOptionalString(data, 'photoURL', 500)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMembershipIndex(data, userId, businessId) {
+      return data.keys().hasAll(['businessId', 'userId', 'businessName', 'businessType', 'role', 'currency', 'joinedAt', 'updatedAt'])
+        && data.keys().hasOnly(['businessId', 'userId', 'businessName', 'businessType', 'role', 'currency', 'joinedAt', 'updatedAt'])
+        && data.businessId == businessId
+        && data.userId == userId
+        && isValidId(data.businessId)
+        && isValidId(data.userId)
+        && isValidString(data.businessName, 1, 120)
+        && isValidString(data.businessType, 1, 80)
+        && isValidRole(data.role)
+        && isValidString(data.currency, 3, 6)
+        && data.joinedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBusiness(data, businessId) {
+      return data.keys().hasAll([
+          'id', 'name', 'businessType', 'ownerId', 'country', 'currency',
+          'timezone', 'invoicePrefix', 'nextInvoiceNumber', 'taxRate', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'name', 'businessType', 'ownerId', 'email', 'phone', 'address',
+          'country', 'currency', 'timezone', 'invoicePrefix', 'nextInvoiceNumber',
+          'taxRate', 'receiptFooter', 'logoUrl', 'createdAt', 'updatedAt'
+        ])
+        && data.id == businessId
+        && isValidId(data.id)
+        && isValidString(data.name, 1, 120)
+        && isValidString(data.businessType, 1, 80)
+        && isValidId(data.ownerId)
+        && isValidOptionalString(data, 'email', 150)
+        && isValidOptionalString(data, 'phone', 40)
+        && isValidOptionalString(data, 'address', 240)
+        && isValidString(data.country, 2, 80)
+        && isValidString(data.currency, 3, 6)
+        && isValidString(data.timezone, 2, 80)
+        && isValidString(data.invoicePrefix, 1, 10)
+        && data.nextInvoiceNumber is int
+        && data.nextInvoiceNumber >= 1
+        && isValidNonNegativeNumber(data.taxRate)
+        && data.taxRate <= 100
+        && isValidOptionalString(data, 'receiptFooter', 300)
+        && isValidOptionalString(data, 'logoUrl', 500)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBusinessMember(data, businessId, memberId) {
+      return data.keys().hasAll(['userId', 'businessId', 'email', 'displayName', 'role', 'status', 'joinedAt', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'businessId', 'email', 'displayName', 'role', 'status', 'inviteId', 'joinedAt', 'updatedAt'])
+        && data.userId == memberId
+        && data.businessId == businessId
+        && isValidId(data.userId)
+        && isValidId(data.businessId)
+        && isValidString(data.email, 3, 150)
+        && isValidString(data.displayName, 1, 120)
+        && isValidRole(data.role)
+        && data.status in ['active', 'suspended']
+        && (!('inviteId' in data) || isValidId(data.inviteId))
+        && data.joinedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCustomer(data, businessId, customerId) {
+      return data.keys().hasAll(['id', 'businessId', 'name', 'phone', 'balance', 'totalSpent', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'businessId', 'name', 'phone', 'email', 'address', 'balance', 'totalSpent', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.id == customerId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidString(data.name, 1, 120)
+        && isValidString(data.phone, 0, 40)
+        && isValidOptionalString(data, 'email', 150)
+        && isValidOptionalString(data, 'address', 240)
+        && isValidNonNegativeNumber(data.balance)
+        && isValidNonNegativeNumber(data.totalSpent)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProduct(data, businessId, productId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'name', 'sku', 'category', 'costPrice',
+          'sellingPrice', 'quantity', 'minStockAlert', 'unit', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'name', 'sku', 'category', 'costPrice',
+          'sellingPrice', 'quantity', 'minStockAlert', 'unit', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && data.id == productId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidString(data.name, 1, 140)
+        && isValidString(data.sku, 1, 60)
+        && isValidString(data.category, 1, 60)
+        && isValidNonNegativeNumber(data.costPrice)
+        && isValidNonNegativeNumber(data.sellingPrice)
+        && isValidNonNegativeNumber(data.quantity)
+        && isValidNonNegativeNumber(data.minStockAlert)
+        && isValidString(data.unit, 1, 24)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCategory(data, businessId, categoryId) {
+      return data.keys().hasAll(['id', 'businessId', 'name', 'kind', 'createdAt'])
+        && data.keys().hasOnly(['id', 'businessId', 'name', 'kind', 'createdAt'])
+        && data.id == categoryId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidString(data.name, 1, 60)
+        && data.kind in ['product', 'expense']
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSale(data, businessId, saleId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'invoiceNo', 'customerId', 'customerName', 'date',
+          'items', 'subtotal', 'discount', 'total', 'status', 'amountPaid',
+          'paymentMethod', 'type', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'invoiceNo', 'customerId', 'customerName', 'date',
+          'items', 'subtotal', 'discount', 'total', 'status', 'amountPaid',
+          'paymentMethod', 'type', 'notes', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && data.id == saleId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidString(data.invoiceNo, 1, 24)
+        && isValidId(data.customerId)
+        && isValidString(data.customerName, 1, 120)
+        && isValidString(data.date, 10, 40)
+        && data.items is list
+        && data.items.size() >= 1
+        && data.items.size() <= 100
+        && data.items[0] is map
+        && data.items[0].keys().hasAll(['productId', 'name', 'quantity', 'price'])
+        && isValidNonNegativeNumber(data.subtotal)
+        && isValidNonNegativeNumber(data.discount)
+        && isValidNonNegativeNumber(data.total)
+        && isValidSaleStatus(data.status)
+        && isValidNonNegativeNumber(data.amountPaid)
+        && data.amountPaid <= data.total
+        && (data.status != 'Paid' || data.amountPaid == data.total)
+        && isValidPaymentMethod(data.paymentMethod)
+        && data.type in ['sale', 'quote']
+        && isValidOptionalString(data, 'notes', 300)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPayment(data, businessId, paymentId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'customerId', 'customerName', 'amount',
+          'date', 'method', 'idempotencyKey', 'createdBy', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'customerId', 'customerName', 'amount',
+          'date', 'method', 'note', 'idempotencyKey', 'createdBy', 'createdAt'
+        ])
+        && data.id == paymentId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidId(data.customerId)
+        && isValidString(data.customerName, 1, 120)
+        && isValidNumber(data.amount)
+        && data.amount > 0
+        && isValidString(data.date, 10, 40)
+        && isValidPaymentMethod(data.method)
+        && isValidOptionalString(data, 'note', 240)
+        && isValidId(data.idempotencyKey)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidExpense(data, businessId, expenseId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'description', 'category', 'amount',
+          'date', 'paymentMethod', 'createdBy', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'description', 'category', 'amount',
+          'date', 'paymentMethod', 'reference', 'createdBy', 'createdAt'
+        ])
+        && data.id == expenseId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidString(data.description, 1, 240)
+        && isValidString(data.category, 1, 60)
+        && isValidNumber(data.amount)
+        && data.amount > 0
+        && isValidString(data.date, 10, 40)
+        && isValidPaymentMethod(data.paymentMethod)
+        && isValidOptionalString(data, 'reference', 80)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidInventoryMovement(data, businessId, movementId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'productId', 'productName', 'type',
+          'quantityDelta', 'previousQty', 'newQty', 'createdBy', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'productId', 'productName', 'type',
+          'quantityDelta', 'previousQty', 'newQty', 'reason', 'createdBy', 'createdAt'
+        ])
+        && data.id == movementId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidId(data.productId)
+        && isValidString(data.productName, 1, 140)
+        && data.type in ['sale', 'restock', 'adjustment', 'migration']
+        && isValidNumber(data.quantityDelta)
+        && isValidNonNegativeNumber(data.previousQty)
+        && isValidNonNegativeNumber(data.newQty)
+        && isValidOptionalString(data, 'reason', 200)
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAuditLog(data, businessId, logId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'action', 'entityType', 'entityId',
+          'summary', 'actorId', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'action', 'entityType', 'entityId',
+          'summary', 'actorId', 'actorEmail', 'createdAt'
+        ])
+        && data.id == logId
+        && data.businessId == businessId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidString(data.action, 1, 60)
+        && isValidString(data.entityType, 1, 40)
+        && isValidString(data.entityId, 1, 128)
+        && isValidString(data.summary, 1, 300)
+        && isValidId(data.actorId)
+        && isValidOptionalString(data, 'actorEmail', 150)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidInvitation(data, inviteId) {
+      return data.keys().hasAll([
+          'id', 'businessId', 'businessName', 'businessType', 'currency',
+          'email', 'role', 'invitedBy', 'invitedByName', 'businessOwnerId',
+          'status', 'expiresAt', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'businessId', 'businessName', 'businessType', 'currency',
+          'email', 'role', 'invitedBy', 'invitedByName', 'businessOwnerId',
+          'status', 'expiresAt', 'createdAt', 'acceptedBy', 'acceptedAt'
+        ])
+        && data.id == inviteId
+        && isValidId(data.id)
+        && isValidId(data.businessId)
+        && isValidString(data.businessName, 1, 120)
+        && isValidString(data.businessType, 1, 80)
+        && isValidString(data.currency, 3, 6)
+        && isValidString(data.email, 3, 150)
+        && isValidInvitableRole(data.role)
+        && isValidId(data.invitedBy)
+        && isValidString(data.invitedByName, 1, 120)
+        && isValidId(data.businessOwnerId)
+        && data.status in ['pending', 'accepted', 'revoked']
+        && data.expiresAt is timestamp
+        && data.createdAt is timestamp
+        && (!('acceptedBy' in data) || isValidId(data.acceptedBy))
+        && (!('acceptedAt' in data) || data.acceptedAt is timestamp);
+    }
+
+    // =========================================================================
+    // 1. User Profiles & Membership Index
+    // =========================================================================
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoURL', 'updatedAt']);
+      allow delete: if false;
+
+      match /memberships/{businessId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(businessId) && request.auth.uid == userId;
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && resource.data.userId == userId;
+
+        allow create: if isVerified()
+          && isValidId(userId)
+          && isValidId(businessId)
+          && isValidMembershipIndex(incoming(), userId, businessId)
+          && incoming().joinedAt == request.time
+          && incoming().updatedAt == request.time
+          && (request.auth.uid == userId || isBusinessAdmin(businessId))
+          && getAfter(/databases/$(database)/documents/businesses/$(businessId)/members/$(userId)).data.role == incoming().role
+          && getAfter(/databases/$(database)/documents/businesses/$(businessId)/members/$(userId)).data.status == 'active';
+
+        allow update: if isVerified()
+          && isValidId(userId)
+          && isValidId(businessId)
+          && isValidMembershipIndex(incoming(), userId, businessId)
+          && incoming().businessId == existing().businessId
+          && incoming().userId == existing().userId
+          && incoming().joinedAt == existing().joinedAt
+          && incoming().updatedAt == request.time
+          && getAfter(/databases/$(database)/documents/businesses/$(businessId)/members/$(userId)).data.role == incoming().role
+          && (
+            (isBusinessAdmin(businessId) && incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'businessType', 'role', 'currency', 'updatedAt']))
+            || (request.auth.uid == userId && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['businessName', 'businessType', 'currency', 'updatedAt']))
+          );
+
+        allow delete: if isVerified()
+          && isValidId(userId)
+          && isValidId(businessId)
+          && (request.auth.uid == userId || isBusinessAdmin(businessId));
+      }
+    }
+
+    // =========================================================================
+    // 2. Staff Invitations (Single-use, email-scoped)
+    // =========================================================================
+
+    match /invitations/{inviteId} {
+      allow get: if isVerified() && isValidId(inviteId) && (
+        existing().email == request.auth.token.email
+        || isBusinessAdmin(existing().businessId)
+      );
+
+      allow list: if isVerified() && (
+        resource.data.email == request.auth.token.email
+        || resource.data.invitedBy == request.auth.uid
+        || resource.data.businessOwnerId == request.auth.uid
+      );
+
+      allow create: if isVerified()
+        && isValidId(inviteId)
+        && isValidInvitation(incoming(), inviteId)
+        && incoming().invitedBy == request.auth.uid
+        && incoming().businessOwnerId == get(/databases/$(database)/documents/businesses/$(incoming().businessId)).data.ownerId
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().expiresAt > request.time
+        && !('acceptedBy' in incoming())
+        && !('acceptedAt' in incoming())
+        && isBusinessAdmin(incoming().businessId);
+
+      allow update: if isVerified()
+        && isValidId(inviteId)
+        && isValidInvitation(incoming(), inviteId)
+        && incoming().id == existing().id
+        && incoming().businessId == existing().businessId
+        && incoming().email == existing().email
+        && incoming().role == existing().role
+        && incoming().invitedBy == existing().invitedBy
+        && incoming().businessOwnerId == existing().businessOwnerId
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action: Accept invitation by matching verified email + atomic member creation
+          (
+            existing().status == 'pending'
+            && existing().expiresAt > request.time
+            && existing().email == request.auth.token.email
+            && incoming().status == 'accepted'
+            && incoming().acceptedBy == request.auth.uid
+            && incoming().acceptedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'acceptedBy', 'acceptedAt'])
+            && getAfter(/databases/$(database)/documents/businesses/$(existing().businessId)/members/$(request.auth.uid)).data.inviteId == inviteId
+            && getAfter(/databases/$(database)/documents/businesses/$(existing().businessId)/members/$(request.auth.uid)).data.role == existing().role
+          )
+          ||
+          // Action: Revoke pending invitation by business Owner/Admin
+          (
+            isBusinessAdmin(existing().businessId)
+            && existing().status == 'pending'
+            && incoming().status == 'revoked'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // =========================================================================
+    // 3. Businesses Root & Multi-Tenant Subcollections
+    // =========================================================================
+
+    match /businesses/{businessId} {
+      allow get: if isValidId(businessId) && isVerified() && (
+        (resource != null && resource.data.ownerId == request.auth.uid)
+        || isActiveMember(businessId)
+      );
+      allow list: if false;
+
+      allow create: if isVerified()
+        && isValidId(businessId)
+        && isValidBusiness(incoming(), businessId)
+        && incoming().ownerId == request.auth.uid
+        && incoming().nextInvoiceNumber == 101
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data.role == 'Owner'
+        && getAfter(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data.status == 'active';
+
+      allow update: if isVerified()
+        && isValidId(businessId)
+        && isValidBusiness(incoming(), businessId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Update business profile & settings (Owner / Administrator)
+          (
+            isBusinessAdmin(businessId)
+            && incoming().ownerId == existing().ownerId
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'businessType', 'email', 'phone', 'address', 'country',
+              'currency', 'timezone', 'invoicePrefix', 'taxRate', 'receiptFooter',
+              'logoUrl', 'updatedAt'
+            ])
+          )
+          ||
+          // Action: Increment invoice counter atomically during sale creation or migration
+          (
+            canManageSales(businessId)
+            && incoming().ownerId == existing().ownerId
+            && (
+              incoming().nextInvoiceNumber == existing().nextInvoiceNumber + 1
+              || (isBusinessAdmin(businessId) && incoming().nextInvoiceNumber >= existing().nextInvoiceNumber && incoming().nextInvoiceNumber <= existing().nextInvoiceNumber + 10000)
+            )
+            && incoming().diff(existing()).affectedKeys().hasOnly(['nextInvoiceNumber', 'updatedAt'])
+          )
+          ||
+          // Action: Transfer business ownership (Owner only)
+          (
+            isBusinessOwner(businessId)
+            && exists(/databases/$(database)/documents/businesses/$(businessId)/members/$(incoming().ownerId))
+            && getAfter(/databases/$(database)/documents/businesses/$(businessId)/members/$(incoming().ownerId)).data.role == 'Owner'
+            && getAfter(/databases/$(database)/documents/businesses/$(businessId)/members/$(request.auth.uid)).data.role == 'Administrator'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['ownerId', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+
+      // -----------------------------------------------------------------------
+      // Business Members (Authoritative RBAC Source of Truth)
+      // -----------------------------------------------------------------------
+      match /members/{memberId} {
+        allow get: if isValidId(businessId) && isValidId(memberId) && (
+          isActiveMember(businessId)
+          || (isVerified() && request.auth.uid == memberId)
+        );
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isVerified()
+          && isValidId(businessId)
+          && isValidId(memberId)
+          && isValidBusinessMember(incoming(), businessId, memberId)
+          && incoming().status == 'active'
+          && incoming().joinedAt == request.time
+          && incoming().updatedAt == request.time
+          && (
+            // Case 1: Creator creating new business as Owner atomically
+            (
+              memberId == request.auth.uid
+              && incoming().role == 'Owner'
+              && !('inviteId' in incoming())
+              && !exists(/databases/$(database)/documents/businesses/$(businessId))
+              && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid
+            )
+            ||
+            // Case 2: Invited user accepting a real pending invitation matching their verified email and role
+            (
+              memberId == request.auth.uid
+              && ('inviteId' in incoming())
+              && isValidInvitableRole(incoming().role)
+              && exists(/databases/$(database)/documents/businesses/$(businessId))
+              && incoming().email == request.auth.token.email
+              && exists(/databases/$(database)/documents/invitations/$(incoming().inviteId))
+              && get(/databases/$(database)/documents/invitations/$(incoming().inviteId)).data.status == 'pending'
+              && get(/databases/$(database)/documents/invitations/$(incoming().inviteId)).data.expiresAt > request.time
+              && get(/databases/$(database)/documents/invitations/$(incoming().inviteId)).data.businessId == businessId
+              && get(/databases/$(database)/documents/invitations/$(incoming().inviteId)).data.email == request.auth.token.email
+              && get(/databases/$(database)/documents/invitations/$(incoming().inviteId)).data.role == incoming().role
+              && getAfter(/databases/$(database)/documents/invitations/$(incoming().inviteId)).data.status == 'accepted'
+              && getAfter(/databases/$(database)/documents/invitations/$(incoming().inviteId)).data.acceptedBy == request.auth.uid
+            )
+            ||
+            // Case 3: Owner or Administrator directly creating a staff member account atomically
+            (
+              isBusinessAdmin(businessId)
+              && memberId != request.auth.uid
+              && isValidInvitableRole(incoming().role)
+              && !('inviteId' in incoming())
+              && exists(/databases/$(database)/documents/businesses/$(businessId))
+              && getAfter(/databases/$(database)/documents/users/$(memberId)/memberships/$(businessId)).data.role == incoming().role
+              && getAfter(/databases/$(database)/documents/users/$(memberId)/memberships/$(businessId)).data.businessId == businessId
+              && getAfter(/databases/$(database)/documents/users/$(memberId)/memberships/$(businessId)).data.userId == memberId
+            )
+          );
+
+        allow update: if isVerified()
+          && isValidId(businessId)
+          && isValidId(memberId)
+          && isValidBusinessMember(incoming(), businessId, memberId)
+          && incoming().userId == existing().userId
+          && incoming().businessId == existing().businessId
+          && incoming().joinedAt == existing().joinedAt
+          && incoming().updatedAt == request.time
+          && (
+            // Owner can update roles/status of members or transfer ownership
+            (
+              isBusinessOwner(businessId)
+              && (
+                (memberId != request.auth.uid && incoming().role != 'Owner' && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'displayName', 'updatedAt']))
+                || (memberId != request.auth.uid && incoming().role == 'Owner' && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == memberId && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt']))
+                || (memberId == request.auth.uid && incoming().role == 'Administrator' && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId != request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt']))
+              )
+            )
+            ||
+            // Administrator can update non-Owner, non-Admin roles (never themselves)
+            (
+              isBusinessAdmin(businessId)
+              && memberId != request.auth.uid
+              && existing().role != 'Owner'
+              && existing().role != 'Administrator'
+              && incoming().role in ['Manager', 'Cashier', 'Inventory Staff', 'Accountant', 'Viewer']
+              && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'status', 'displayName', 'updatedAt'])
+            )
+            ||
+            // Member updating their own display name without touching role/status
+            (
+              memberId == request.auth.uid
+              && incoming().role == existing().role
+              && incoming().status == existing().status
+              && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+            )
+          );
+
+        allow delete: if isVerified()
+          && isValidId(businessId)
+          && isValidId(memberId)
+          && existing().role != 'Owner'
+          && (isBusinessAdmin(businessId) || memberId == request.auth.uid);
+      }
+
+      // -----------------------------------------------------------------------
+      // Business Categories
+      // -----------------------------------------------------------------------
+      match /categories/{categoryId} {
+        allow get: if isValidId(businessId) && isValidId(categoryId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+        allow create: if isValidId(businessId)
+          && isValidId(categoryId)
+          && isValidCategory(incoming(), businessId, categoryId)
+          && incoming().createdAt == request.time
+          && (
+            canManageStock(businessId)
+            || canManageExpenses(businessId)
+            || (!exists(/databases/$(database)/documents/businesses/$(businessId)) && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid)
+          );
+        allow update: if false;
+        allow delete: if isValidId(businessId) && isValidId(categoryId) && isBusinessAdmin(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // Customers
+      // -----------------------------------------------------------------------
+      match /customers/{customerId} {
+        allow get: if isValidId(businessId) && isValidId(customerId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isValidId(businessId)
+          && isValidId(customerId)
+          && isValidCustomer(incoming(), businessId, customerId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && (
+            canManageCustomers(businessId)
+            || (!exists(/databases/$(database)/documents/businesses/$(businessId)) && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid)
+          );
+
+        allow update: if isValidId(businessId)
+          && isValidId(customerId)
+          && isValidCustomer(incoming(), businessId, customerId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().createdBy == existing().createdBy
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Edit customer contact details
+            (
+              canManageCustomers(businessId)
+              && incoming().balance == existing().balance
+              && incoming().totalSpent == existing().totalSpent
+              && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'email', 'address', 'updatedAt'])
+            )
+            ||
+            // Action: Update customer balance & totalSpent on sale or payment
+            (
+              canRecordPayments(businessId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'totalSpent', 'updatedAt'])
+            )
+          );
+
+        allow delete: if isValidId(businessId) && isValidId(customerId) && isBusinessAdmin(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // Products & Services
+      // -----------------------------------------------------------------------
+      match /products/{productId} {
+        allow get: if isValidId(businessId) && isValidId(productId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isValidId(businessId)
+          && isValidId(productId)
+          && isValidProduct(incoming(), businessId, productId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/businesses/$(businessId))
+          && canManageStock(businessId);
+
+        allow update: if isValidId(businessId)
+          && isValidId(productId)
+          && isValidProduct(incoming(), businessId, productId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().createdBy == existing().createdBy
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: Full product / restock update by stock managers
+            (
+              canManageStock(businessId)
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'name', 'sku', 'category', 'costPrice', 'sellingPrice',
+                'quantity', 'minStockAlert', 'unit', 'updatedAt'
+              ])
+            )
+            ||
+            // Action: Deduct stock quantity during sale by cashier/sales roles
+            (
+              canManageSales(businessId)
+              && incoming().quantity <= existing().quantity
+              && incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'updatedAt'])
+            )
+          );
+
+        allow delete: if isValidId(businessId) && isValidId(productId) && isBusinessAdmin(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // Sales & Invoices (Terminal 'Paid' state locked)
+      // -----------------------------------------------------------------------
+      match /sales/{saleId} {
+        allow get: if isValidId(businessId) && isValidId(saleId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isValidId(businessId)
+          && isValidId(saleId)
+          && isValidSale(incoming(), businessId, saleId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/businesses/$(businessId))
+          && canManageSales(businessId);
+
+        allow update: if isValidId(businessId)
+          && isValidId(saleId)
+          && isValidSale(incoming(), businessId, saleId)
+          && incoming().id == existing().id
+          && incoming().businessId == existing().businessId
+          && incoming().invoiceNo == existing().invoiceNo
+          && incoming().customerId == existing().customerId
+          && incoming().createdBy == existing().createdBy
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          // Terminal state lock: Paid sales cannot be altered
+          && existing().status != 'Paid'
+          && (
+            // Action: Record invoice payment / mark Paid
+            (
+              canRecordPayments(businessId)
+              && incoming().amountPaid >= existing().amountPaid
+              && incoming().total == existing().total
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'amountPaid', 'updatedAt'])
+            )
+          );
+
+        allow delete: if false;
+      }
+
+      // -----------------------------------------------------------------------
+      // Debt Payments (Append-Only Financial Ledger)
+      // -----------------------------------------------------------------------
+      match /payments/{paymentId} {
+        allow get: if isValidId(businessId) && isValidId(paymentId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isValidId(businessId)
+          && isValidId(paymentId)
+          && isValidPayment(incoming(), businessId, paymentId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/businesses/$(businessId))
+          && canRecordPayments(businessId);
+
+        allow update, delete: if false;
+      }
+
+      // -----------------------------------------------------------------------
+      // Expenses
+      // -----------------------------------------------------------------------
+      match /expenses/{expenseId} {
+        allow get: if isValidId(businessId) && isValidId(expenseId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isValidId(businessId)
+          && isValidId(expenseId)
+          && isValidExpense(incoming(), businessId, expenseId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/businesses/$(businessId))
+          && canManageExpenses(businessId);
+
+        allow update: if false;
+        allow delete: if isValidId(businessId) && isValidId(expenseId) && isBusinessAdmin(businessId);
+      }
+
+      // -----------------------------------------------------------------------
+      // Inventory Movements (Immutable Stock Audit Trail)
+      // -----------------------------------------------------------------------
+      match /inventoryMovements/{movementId} {
+        allow get: if isValidId(businessId) && isValidId(movementId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isValidId(businessId)
+          && isValidId(movementId)
+          && isValidInventoryMovement(incoming(), businessId, movementId)
+          && incoming().createdBy == request.auth.uid
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/businesses/$(businessId))
+          && (canManageStock(businessId) || canManageSales(businessId));
+
+        allow update, delete: if false;
+      }
+
+      // -----------------------------------------------------------------------
+      // Audit Logs (Immutable Business Event Trail)
+      // -----------------------------------------------------------------------
+      match /auditLogs/{logId} {
+        allow get: if isValidId(businessId) && isValidId(logId) && isActiveMember(businessId);
+        allow list: if isActiveMember(businessId) && resource.data.businessId == businessId;
+
+        allow create: if isValidId(businessId)
+          && isValidId(logId)
+          && isValidAuditLog(incoming(), businessId, logId)
+          && incoming().actorId == request.auth.uid
+          && incoming().createdAt == request.time
+          && (
+            isActiveMember(businessId)
+            || (!exists(/databases/$(database)/documents/businesses/$(businessId)) && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid)
+          );
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

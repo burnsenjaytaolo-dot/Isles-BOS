@@ -1,0 +1,314 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Private user account profile stored under users/{userId}.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 150 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "createdAt", "updatedAt"]
+    },
+    "BusinessMembershipIndex": {
+      "title": "User Business Membership Index",
+      "description": "Index document linking a user to an authorized business.",
+      "type": "object",
+      "properties": {
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "businessType": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "role": {
+          "type": "string",
+          "enum": ["Owner", "Administrator", "Manager", "Cashier", "Inventory Staff", "Accountant", "Viewer"]
+        },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 6 },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["businessId", "userId", "businessName", "businessType", "role", "currency", "joinedAt", "updatedAt"]
+    },
+    "Business": {
+      "title": "Business",
+      "description": "Root multi-tenant business profile and settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "businessType": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "address": { "type": "string", "maxLength": 240 },
+        "country": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 6 },
+        "timezone": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "invoicePrefix": { "type": "string", "minLength": 1, "maxLength": 10 },
+        "nextInvoiceNumber": { "type": "integer" },
+        "taxRate": { "type": "number" },
+        "receiptFooter": { "type": "string", "maxLength": 300 },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "businessType", "ownerId", "country", "currency", "timezone", "invoicePrefix", "nextInvoiceNumber", "taxRate", "createdAt", "updatedAt"]
+    },
+    "BusinessMember": {
+      "title": "Business Member",
+      "description": "Authoritative staff membership and RBAC role under a business.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": {
+          "type": "string",
+          "enum": ["Owner", "Administrator", "Manager", "Cashier", "Inventory Staff", "Accountant", "Viewer"]
+        },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "inviteId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "businessId", "email", "displayName", "role", "status", "joinedAt", "updatedAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Business customer contact and credit account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 150 },
+        "address": { "type": "string", "maxLength": 240 },
+        "balance": { "type": "number" },
+        "totalSpent": { "type": "number" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "name", "phone", "balance", "totalSpent", "createdBy", "createdAt", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product or billable service.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "sku": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "costPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "quantity": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 24 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "name", "sku", "category", "costPrice", "sellingPrice", "quantity", "minStockAlert", "unit", "createdBy", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Product or expense category configured for a business.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "kind": { "type": "string", "enum": ["product", "expense"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "name", "kind", "createdAt"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Sales invoice record scoped to a business.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "invoiceNo": { "type": "string", "minLength": 1, "maxLength": 24 },
+        "customerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "date": { "type": "string", "format": "date-time" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["Paid", "Part paid", "Pay later"] },
+        "amountPaid": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "Bank Transfer", "Mobile Money", "Credit"] },
+        "type": { "type": "string", "enum": ["sale", "quote"] },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "invoiceNo", "customerId", "customerName", "date", "items", "subtotal", "discount", "total", "status", "amountPaid", "paymentMethod", "type", "createdBy", "createdAt", "updatedAt"]
+    },
+    "DebtPayment": {
+      "title": "Customer Payment",
+      "description": "Payment recorded against a customer credit balance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "customerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "method": { "type": "string", "enum": ["Cash", "Bank Transfer", "Mobile Money", "Credit"] },
+        "note": { "type": "string", "maxLength": 240 },
+        "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "customerId", "customerName", "amount", "date", "method", "idempotencyKey", "createdBy", "createdAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Business expense or supplier bill record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "Bank Transfer", "Mobile Money", "Credit"] },
+        "reference": { "type": "string", "maxLength": 80 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "description", "category", "amount", "date", "paymentMethod", "createdBy", "createdAt"]
+    },
+    "InventoryMovement": {
+      "title": "Inventory Movement",
+      "description": "Immutable audit entry for stock additions, sales deductions, or adjustments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "productName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "type": { "type": "string", "enum": ["sale", "restock", "adjustment", "migration"] },
+        "quantityDelta": { "type": "number" },
+        "previousQty": { "type": "number" },
+        "newQty": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 200 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "productId", "productName", "type", "quantityDelta", "previousQty", "newQty", "createdBy", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Immutable audit record for financial and membership events.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "action": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "entityType": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "entityId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 150 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "action", "entityType", "entityId", "summary", "actorId", "createdAt"]
+    },
+    "Invitation": {
+      "title": "Staff Invitation",
+      "description": "Single-use expiring staff invitation token.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "businessName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "businessType": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 6 },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 150 },
+        "role": {
+          "type": "string",
+          "enum": ["Administrator", "Manager", "Cashier", "Inventory Staff", "Accountant", "Viewer"]
+        },
+        "invitedBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "invitedByName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "businessOwnerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "revoked"] },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "acceptedBy": { "type": "string", "maxLength": 128 },
+        "acceptedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "businessName", "businessType", "currency", "email", "role", "invitedBy", "invitedByName", "businessOwnerId", "status", "expiresAt", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profile."
+    },
+    "/users/{userId}/memberships/{businessId}": {
+      "schema": { "$ref": "#/entities/BusinessMembershipIndex" },
+      "description": "Index of businesses accessible by a user."
+    },
+    "/businesses/{businessId}": {
+      "schema": { "$ref": "#/entities/Business" },
+      "description": "Business tenant profile, invoice sequence, and preferences."
+    },
+    "/businesses/{businessId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/BusinessMember" },
+      "description": "Authoritative business member role and status."
+    },
+    "/businesses/{businessId}/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Customers belonging to a business."
+    },
+    "/businesses/{businessId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Products and services belonging to a business."
+    },
+    "/businesses/{businessId}/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Product and expense categories belonging to a business."
+    },
+    "/businesses/{businessId}/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/Sale" },
+      "description": "Sales and invoices belonging to a business."
+    },
+    "/businesses/{businessId}/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/DebtPayment" },
+      "description": "Customer debt payments belonging to a business."
+    },
+    "/businesses/{businessId}/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Expenses belonging to a business."
+    },
+    "/businesses/{businessId}/inventoryMovements/{movementId}": {
+      "schema": { "$ref": "#/entities/InventoryMovement" },
+      "description": "Immutable inventory movements belonging to a business."
+    },
+    "/businesses/{businessId}/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable audit logs belonging to a business."
+    },
+    "/invitations/{inviteId}": {
+      "schema": { "$ref": "#/entities/Invitation" },
+      "description": "Single-use staff invitations scoped by email and business."
+    }
+  }
+}

@@ -1,0 +1,37 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    function isVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isBusinessMember(businessId) {
+      return isVerified()
+        && firestore.exists(/databases/(default)/documents/businesses/$(businessId)/members/$(request.auth.uid));
+    }
+
+    match /businesses/{businessId}/logos/{fileName} {
+      allow read: if isVerified();
+      allow write: if isBusinessMember(businessId)
+        && request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /businesses/{businessId}/documents/{fileName} {
+      allow read: if isBusinessMember(businessId);
+      allow write: if isBusinessMember(businessId)
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /businesses/{businessId}/invoices/{fileName} {
+      allow read: if isBusinessMember(businessId);
+      allow write: if isBusinessMember(businessId)
+        && request.resource.size < 5 * 1024 * 1024;
+    }
+  }
+}
